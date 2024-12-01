@@ -1,0 +1,2 @@
+# corePython
+startingLerningCoreConceptsOfPython

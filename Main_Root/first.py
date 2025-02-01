@@ -1,5 +1,3 @@
-# # function is a set of code that only runs when its called
-
 # def get_choices():
 
 #     playerChoice = "rock"
@@ -12,8 +10,6 @@
 # print(type(get_choices()))
 
 
-# # print0
-
 # Function to print full pyramid pattern
 def full_pyramid(n):
     for i in range(1, n + 1):
@@ -25,5 +21,5 @@ def full_pyramid(n):
         for k in range(1, 2*i):
             print("*", end="")
         print()
-   
+
 full_pyramid(5)

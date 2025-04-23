@@ -1,0 +1,17 @@
+# Ignore CSV files
+*.csv
+
+# Ignore log files
+*.log
+
+# Ignore JSON files
+*.json
+
+# Ignore txt files
+*.txt
+
+# Ignore .venv folder
+.venv/
+
+myenv/
+*.pyc

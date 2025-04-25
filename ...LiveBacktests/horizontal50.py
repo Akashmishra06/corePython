@@ -9,10 +9,9 @@ from termcolor import colored, cprint
 from datetime import datetime
 from backtestTools.util import setup_logger
 
-
-class R_50_50_30(baseAlgoLogic):
+class horizontal50(baseAlgoLogic):
     def runBacktest(self, portfolio, startDate, endDate):
-        if self.strategyName != "R_50_50_30":
+        if self.strategyName != "horizontal50":
             raise Exception("Strategy Name Mismatch")
         cprint(f"Backtesting: {self.strategyName} UID: {self.fileDirUid}", "green")
         first_stock = portfolio if portfolio and portfolio else None
@@ -56,7 +55,7 @@ class R_50_50_30(baseAlgoLogic):
 
         amountPerTrade = 100000
         lastIndexTimeData = None
-        TotalTradeCanCome = 100
+        TotalTradeCanCome = 50
 
         for timeData in df_dict['ADANIENT'].index:
             for stock in stocks:
@@ -80,6 +79,7 @@ class R_50_50_30(baseAlgoLogic):
                                 exitType = "RsiTargetHit"
                                 stockAlgoLogic.exitOrder(index, exitType, df_dict[stock].at[lastIndexTimeData, "c"])
                                 logger.info(f"nowTotalTrades:-{nowTotalTrades},RsiTargetHit- Datetime: {stockAlgoLogic.humanTime}\tStock: {stock}\tClose: {df_dict[stock].at[lastIndexTimeData, 'c']}")
+
                             elif df_dict[stock].at[lastIndexTimeData, "rsi"] < 30:
                                 exitType = "stopLoss"
                                 stockAlgoLogic.exitOrder(index, exitType, df_dict[stock].at[lastIndexTimeData, "c"])
@@ -92,8 +92,6 @@ class R_50_50_30(baseAlgoLogic):
                         nowTotalTrades = nowTotalTrades + 1
                         stockAlgoLogic.entryOrder(entry_price, stock, (amountPerTrade // entry_price), "BUY")
                         logger.info(f"nowTotalTrades:-{nowTotalTrades},Entry- Datetime: {stockAlgoLogic.humanTime}\tStock: {stock}\tClose: {df_dict[stock].at[lastIndexTimeData, 'c']}")
-                
-                        logger.info(f"{nowTotalTrades}, of {TotalTradeCanCome} data of Trades Entry and Exit")
 
                 lastIndexTimeData = timeData
                 stockAlgoLogic.pnlCalculator()
@@ -104,17 +102,23 @@ class R_50_50_30(baseAlgoLogic):
                     exitType = "TimeUp"
                     stockAlgoLogic.exitOrder(index, exitType, row['CurrentPrice'])
 
+
 if __name__ == "__main__":
     startNow = datetime.now()
 
     devName = "AK"
-    strategyName = "R_50_50_30"
+    strategyName = "horizontal50"
     version = "v1"
+
     startDate = datetime(2019, 1, 1, 9, 15)
     endDate = datetime(2024, 12, 31, 15, 30)
+
     portfolio = 'combinedList'
-    algoLogicObj = R_50_50_30(devName, strategyName, version)
+
+    algoLogicObj = horizontal50(devName, strategyName, version)
     fileDir, closedPnl = algoLogicObj.runBacktest(portfolio, startDate, endDate)
+
     dailyReport = calculate_mtm(closedPnl, fileDir, timeFrame="15T", mtm=False, equityMarket=True)
+
     endNow = datetime.now()
     print(f"Done. Ended in {endNow-startNow}")

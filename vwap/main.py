@@ -1,6 +1,7 @@
-from backtestTools.util import createPortfolio
+from backtestTools.util import createPortfolio, calculateDailyReport, limitCapital, generateReportFile
 from backtestTools.algoLogic import baseAlgoLogic, equityOverNightAlgoLogic
-from backtestTools.histData import getFnoBacktestData
+from backtestTools.histData import getEquityBacktestData
+from backtestTools.histData import getEquityHistData
 from backtestTools.util import setup_logger
 from datetime import datetime, timedelta
 from termcolor import colored, cprint
@@ -9,11 +10,11 @@ import multiprocessing
 import numpy as np
 import logging
 import talib
+import pandas as pd
 
-
-class EqoNifty(baseAlgoLogic):
+class Vwap_Aniket(baseAlgoLogic):
     def runBacktest(self, portfolio, startDate, endDate):
-        if self.strategyName != "EqoNifty":
+        if self.strategyName != "Vwap_Aniket":
             raise Exception("Strategy Name Mismatch")
         total_backtests = sum(len(batch) for batch in portfolio)
         completed_backtests = 0
@@ -43,30 +44,32 @@ class EqoNifty(baseAlgoLogic):
         logger.propagate = False
 
         try:
-            df = getFnoBacktestData(stockName, startTimeEpoch, endTimeEpoch, "30Min")
-            if df is None:
-                return
-            if not all(col in df.columns for col in ['h', 'l', 'c']):
-                raise ValueError("Required columns 'h', 'l', 'c' not found in DataFrame")
-            df['bb_upper'], df['bb_middle'], df['bb_lower'] = talib.BBANDS(
-                df['c'], timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
-            typical_price = (df['h'] + df['l'] + df['c']) / 3
-            ema_typical = talib.EMA(typical_price, timeperiod=20)
-            atr = talib.ATR(df['h'], df['l'], df['c'], timeperiod=20)
-            df['kc_middle'] = ema_typical
-            df['kc_upper'] = ema_typical + 2 * atr
-            df['kc_lower'] = ema_typical - 2 * atr
-            df['Ema10'] = talib.EMA(df['c'], timeperiod=12)
-            df['EntryConditions'] = np.where((df['kc_upper'] < df['bb_upper']) & (df['bb_lower'] < df['kc_lower']) & (df['c'] > df['Ema10']), "EntryConditions", "")
-            df['ExitConditonOne'] = np.where((df['kc_upper'] > df['bb_upper']), "ExitConditonOne", "")
-            df['ExitConditonTwo'] = np.where((df['kc_lower'] < df['bb_lower']), "ExitConditonTwo", "")
+            df = getEquityBacktestData(stockName, startTimeEpoch-7776000, endTimeEpoch, "5Min")
         except Exception as e:
-            self.strategyLogger.info(f"Data not found for Nifty50 in range {startDate} to {endDate}")
+            print(stockName)
             raise Exception(e)
+        
+        print(df)
 
+        df['typical_price'] = (df['h'] + df['l'] + df['c']) / 3
+
+        tpv = df['typical_price'] * df['v']
+        vwap = tpv.rolling(window=20).sum() / df['v'].rolling(window=20).sum()
+        df['vwap'] = vwap
+
+        df['vwap_std'] = df['vwap'].rolling(window=20).std()
+
+        df['vwap_upper_2'] = df['vwap'] + 2 * df['vwap_std']
+        df['vwap_lower_2'] = df['vwap'] - 2 * df['vwap_std']
+
+        df['EntryLong'] = np.where(df['c'] > df['vwap_upper_2'], "EntryLong", "")
+        df['EntryShort'] = np.where(df['c'] < df['vwap_lower_2'], "EntryShort", "")
+
+        df.dropna(inplace=True)
         df = df[df.index > startTimeEpoch]
         df.to_csv(f"{self.fileDir['backtestResultsCandleData']}{stockName}_df.csv")
 
+        amountPerTrade = 100000
         lastIndexTimeData = None
 
         for timeData in df.index:
@@ -82,32 +85,45 @@ class EqoNifty(baseAlgoLogic):
                         stockAlgoLogic.openPnl.at[index, 'CurrentPrice'] = df.at[lastIndexTimeData, "c"]
                     except Exception as e:
                         logging.info(e)
+
             stockAlgoLogic.pnlCalculator()
 
             for index, row in stockAlgoLogic.openPnl.iterrows():
                 if lastIndexTimeData in df.index:
 
-                    # if stockAlgoLogic.humanTime.time() >= time(15,20):
-                    #     exitType = "IntradayExit"
-                    #     stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
-
-                    if (df.at[lastIndexTimeData, "ExitConditonOne"] == "ExitConditonOne"):
-                        exitType = "ExitConditonOne"
+                    if stockAlgoLogic.humanTime.time() >= time(15, 15):
+                        exitType = "Time Up"
                         stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
 
-                    elif (df.at[lastIndexTimeData, "ExitConditonTwo"] == "ExitConditonTwo"):
-                        exitType = "ExitConditonTwo"
-                        stockAlgoLogic.exitOrder(index, exitType,df.at[lastIndexTimeData, "c"])
+                    elif row['PositionStatus'] == 1:
 
-                    elif row['CurrentPrice'] < (row['EntryPrice']-100):
-                        exitType = "HundredPriceLoss"
-                        stockAlgoLogic.exitOrder(index, exitType,df.at[lastIndexTimeData, "c"])
+                        if (row['EntryPrice']*0.99) > df.at[lastIndexTimeData, "c"]:
+                            exitType = "stopLossHit"
+                            stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
 
-            if (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty) & (stockAlgoLogic.humanTime.time() < time(15,20)):
+                        elif (row['EntryPrice']*1.05) < df.at[lastIndexTimeData, "c"]:
+                            exitType = "TargetHit"
+                            stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
 
-                if (df.at[lastIndexTimeData, "EntryConditions"] == "EntryConditions"):
+                    elif row['PositionStatus'] == -1:
+                    
+                        if (row['EntryPrice']*1.01) < df.at[lastIndexTimeData, "c"]:
+                            exitType = "stopLossHit"
+                            stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
+
+                        elif (row['EntryPrice']*0.95) > df.at[lastIndexTimeData, "c"]:
+                            exitType = "TargetHit"
+                            stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
+
+            if (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty) & (stockAlgoLogic.humanTime.time() < time(15, 10)):
+
+                if (df.at[lastIndexTimeData, "EntryLong"] == "EntryLong"):
                     entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, 75, "BUY")
+                    stockAlgoLogic.entryOrder(entry_price, stockName, (amountPerTrade//entry_price), "BUY")
+
+                elif (df.at[lastIndexTimeData, "EntryShort"] == "EntryShort"):
+                    entry_price = df.at[lastIndexTimeData, "c"]
+                    stockAlgoLogic.entryOrder(entry_price, stockName, (amountPerTrade//entry_price), "SELL")
 
             lastIndexTimeData = timeData
             stockAlgoLogic.pnlCalculator()
@@ -122,16 +138,16 @@ if __name__ == "__main__":
     startNow = datetime.now()
 
     devName = "NA"
-    strategyName = "EqoNifty"
+    strategyName = "Vwap_Aniket"
     version = "v1"
 
-    startDate = datetime(2021, 1, 1, 9, 15)
+    startDate = datetime(2020, 1, 1, 9, 15)
     endDate = datetime(2025, 12, 31, 15, 30)
 
-    portfolio = createPortfolio("/root/equityResearch/EqoNifty/stocksNames.md", 1)
+    portfolio = createPortfolio("/root/equityResearch/vwap/stockNifty200.md", 1)
 
-    algoLogicObj = EqoNifty(devName, strategyName, version)
+    algoLogicObj = Vwap_Aniket(devName, strategyName, version)
     fileDir, closedPnl = algoLogicObj.runBacktest(portfolio, startDate, endDate)
-    
+
     endNow = datetime.now()
     print(f"Done. Ended in {endNow-startNow}")

@@ -10,11 +10,12 @@ import multiprocessing
 import numpy as np
 import logging
 import talib
+import pandas_ta as ta
 import pandas as pd
 
-class Vwap_Aniket(baseAlgoLogic):
+class equityDelta(baseAlgoLogic):
     def runBacktest(self, portfolio, startDate, endDate):
-        if self.strategyName != "Vwap_Aniket":
+        if self.strategyName != "equityDelta":
             raise Exception("Strategy Name Mismatch")
         total_backtests = sum(len(batch) for batch in portfolio)
         completed_backtests = 0
@@ -44,28 +45,48 @@ class Vwap_Aniket(baseAlgoLogic):
         logger.propagate = False
 
         try:
-            df = getEquityBacktestData(stockName, startTimeEpoch-7776000, endTimeEpoch, "5Min")
+            df = getEquityBacktestData(stockName, startTimeEpoch-(86400*500), endTimeEpoch, "45Min")
         except Exception as e:
             print(stockName)
             raise Exception(e)
-        
         print(df)
 
-        df['typical_price'] = (df['h'] + df['l'] + df['c']) / 3
+        upper_band, middle_band, lower_band = talib.BBANDS(df['c'], timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
+        df['BollingerUpper'] = upper_band
+        df['BollingerLower'] = lower_band
 
-        tpv = df['typical_price'] * df['v']
-        vwap = tpv.rolling(window=20).sum() / df['v'].rolling(window=20).sum()
-        df['vwap'] = vwap
+        period = 20
+        multiplier = 2
 
-        df['vwap_std'] = df['vwap'].rolling(window=20).std()
+        middle_line = talib.EMA(df['c'], timeperiod=period)
+        atr = talib.ATR(df['h'], df['l'], df['c'], timeperiod=period)
 
-        df['vwap_upper_2'] = df['vwap'] + 2 * df['vwap_std']
-        df['vwap_lower_2'] = df['vwap'] - 2 * df['vwap_std']
+        upper_line = middle_line + (multiplier * atr)
+        lower_line = middle_line - (multiplier * atr)
 
-        df['EntryLong'] = np.where(df['c'] > df['vwap_upper_2'], "EntryLong", "")
-        df['EntryShort'] = np.where(df['c'] < df['vwap_lower_2'], "EntryShort", "")
+        df['MiddleRange'] = middle_line
+        df['KeltnerChannelUpper'] = upper_line
+        df['KeltnerChannelLower'] = lower_line
 
         df.dropna(inplace=True)
+
+        supertrend_one = ta.supertrend(df["h"], df["l"], df["c"], length=100, multiplier=3.6)
+        print(supertrend_one)
+        supertrend_two = ta.supertrend(df["h"], df["l"], df["c"], length=100, multiplier=1.8)
+
+        df['SupertrendColourOne'] = supertrend_one['SUPERTd_100_3.6']
+        df['SupertrendColourTwo'] = supertrend_two['SUPERTd_100_1.8']
+
+        df['EntryLong'] = np.where(
+            (df['BollingerUpper'] > df['KeltnerChannelUpper']) &
+            (df['KeltnerChannelLower'] > df['BollingerLower']) &
+            (df['SupertrendColourOne'] == 1) &
+            (df['SupertrendColourTwo'] == 1),
+            "EntryLong", ""
+        )
+
+        df['ExitLong'] = np.where(df['SupertrendColourOne'] == -1, "ExitLong", "")
+
         df = df[df.index > startTimeEpoch]
         df.to_csv(f"{self.fileDir['backtestResultsCandleData']}{stockName}_df.csv")
 
@@ -91,39 +112,15 @@ class Vwap_Aniket(baseAlgoLogic):
             for index, row in stockAlgoLogic.openPnl.iterrows():
                 if lastIndexTimeData in df.index:
 
-                    if stockAlgoLogic.humanTime.time() >= time(15, 15):
-                        exitType = "Time Up"
+                    if df.at[lastIndexTimeData, "ExitLong"] == "ExitLong":
+                        exitType = "ExitUsingSupertrend"
                         stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
 
-                    elif row['PositionStatus'] == 1:
-
-                        if (row['EntryPrice']*0.99) > df.at[lastIndexTimeData, "c"]:
-                            exitType = "stopLossHit"
-                            stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
-
-                        elif (row['EntryPriceac']*1.05) < df.at[lastIndexTimeData, "c"]:
-                            exitType = "TargetHit"
-                            stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
-
-                    elif row['PositionStatus'] == -1:
-                    
-                        if (row['EntryPrice']*1.01) < df.at[lastIndexTimeData, "c"]:
-                            exitType = "stopLossHit"
-                            stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
-
-                        elif (row['EntryPrice']*0.95) > df.at[lastIndexTimeData, "c"]:
-                            exitType = "TargetHit"
-                            stockAlgoLogic.exitOrder(index, exitType, df.at[lastIndexTimeData, "c"])
-
-            if (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty) & (stockAlgoLogic.humanTime.time() < time(15, 10)):
+            if (lastIndexTimeData in df.index) & (stockAlgoLogic.openPnl.empty) & (stockAlgoLogic.humanTime.time() < time(15, 15)):
 
                 if (df.at[lastIndexTimeData, "EntryLong"] == "EntryLong"):
                     entry_price = df.at[lastIndexTimeData, "c"]
                     stockAlgoLogic.entryOrder(entry_price, stockName, (amountPerTrade//entry_price), "BUY")
-
-                elif (df.at[lastIndexTimeData, "EntryShort"] == "EntryShort"):
-                    entry_price = df.at[lastIndexTimeData, "c"]
-                    stockAlgoLogic.entryOrder(entry_price, stockName, (amountPerTrade//entry_price), "SELL")
 
             lastIndexTimeData = timeData
             stockAlgoLogic.pnlCalculator()
@@ -138,15 +135,15 @@ if __name__ == "__main__":
     startNow = datetime.now()
 
     devName = "NA"
-    strategyName = "Vwap_Aniket"
+    strategyName = "equityDelta"
     version = "v1"
 
-    startDate = datetime(2020, 1, 1, 9, 15)
+    startDate = datetime(2021, 1, 1, 9, 15)
     endDate = datetime(2025, 12, 31, 15, 30)
 
-    portfolio = createPortfolio("/root/equityResearch/vwap/stockNifty200.md", 1)
+    portfolio = createPortfolio("/root/equityResearch/stocksList/nifty50.md", 1)
 
-    algoLogicObj = Vwap_Aniket(devName, strategyName, version)
+    algoLogicObj = equityDelta(devName, strategyName, version)
     fileDir, closedPnl = algoLogicObj.runBacktest(portfolio, startDate, endDate)
 
     endNow = datetime.now()

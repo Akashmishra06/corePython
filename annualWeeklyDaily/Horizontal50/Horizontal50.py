@@ -39,9 +39,8 @@ class Horizontal50(baseAlgoLogic):
         logger = setup_logger(stockName, f"{self.fileDir['backtestResultsStrategyLogs']}/{stockName}.log")
         logger.propagate = False
 
-
         df = {}
-        directory = "/root/equityResearch/annualWeeklyDaily/Horizontal50/BacktestResults/NA_Vertical50_v1/1/CandleData"
+        directory = "/root/equityResearch/annualWeeklyDaily/Horizontal50/candleData"
 
         # for filename in os.listdir(directory):
         #     if filename.endswith('.csv'):
@@ -89,37 +88,42 @@ class Horizontal50(baseAlgoLogic):
                     file_path = os.path.join(directory, filename)
                     stock_df = pd.read_csv(file_path)
 
-                    if 'datetime' not in stock_df.columns:
-                        print(f"datetime column not found in {filename}")
-                        continue
+                #     if 'datetime' not in stock_df.columns:
+                #         print(f"datetime column not found in {filename}")
+                #         continue
 
-                    stock_df['datetime'] = pd.to_datetime(stock_df['datetime'], errors='coerce')
-                    if stock_df['datetime'].isnull().any():
-                        print(f"Invalid datetime entries in {filename}. Rows with invalid dates will be NaN.")
-                        stock_df = stock_df.dropna(subset=['datetime'])
+                #     stock_df['datetime'] = pd.to_datetime(stock_df['datetime'], errors='coerce')
+                #     if stock_df['datetime'].isnull().any():
+                #         print(f"Invalid datetime entries in {filename}. Rows with invalid dates will be NaN.")
+                #         stock_df = stock_df.dropna(subset=['datetime'])
 
-                    stock_df['year'] = stock_df['datetime'].dt.year
-                    stock_df['month'] = stock_df['datetime'].dt.month
+                #     stock_df['year'] = stock_df['datetime'].dt.year
+                #     stock_df['month'] = stock_df['datetime'].dt.month
 
-                    stock_df['Last'] = None
+                #     stock_df['timeUp'] = ""
+                #     stock_df.loc[stock_df.index[-1], 'timeUp'] = 'timeUp'
+                #     stock_df.dropna(inplace=True)
 
-                    for year in stock_df['year'].unique():
-                        for month in range(1, 13):
-                            if month == 12:
-                                dec_rows = stock_df[(stock_df['year'] == year) & (stock_df['month'] == month)]
-                                if len(dec_rows) > 1:
-                                    second_last_row = dec_rows.iloc[-4]
-                                    stock_df.loc[second_last_row.name, 'Last'] = 'Last'
+                #     stock_df['Last'] = None
 
-                    output_path = os.path.join(directory, f"{stock_ticker}_modified.csv")
-                    stock_df.to_csv(output_path, index=False)
-                    
+                #     for year in stock_df['year'].unique():
+                #         for month in range(1, 13):
+                #             if month == 12:
+                #                 dec_rows = stock_df[(stock_df['year'] == year) & (stock_df['month'] == month)]
+                #                 if len(dec_rows) > 1:
+                #                     second_last_row = dec_rows.iloc[-4]
+                #                     stock_df.loc[second_last_row.name, 'Last'] = 'Last'
+
+                #     output_path = os.path.join(directory, f"{stock_ticker}_modified.csv")
+                #     stock_df.to_csv(output_path, index=False)
+
+                    stock_df['timeUp'] = ""
+                    stock_df.loc[stock_df.index[-2], 'timeUp'] = 'timeUp'
                     df[stock_ticker] = stock_df
-                    
+
                 except Exception as e:
                     print(f"Error processing {filename}: {e}")
                     continue
-
 
         amountPerTrade = 100000
         lastIndexTimeData = None
@@ -136,7 +140,6 @@ class Horizontal50(baseAlgoLogic):
                 print(stock)
 
                 stockAlgoLogic.timeData = timeData
-
                 if lastIndexTimeData is not None:
                     try:
                         stockAlgoLogic.humanTime = df[stock].at[lastIndexTimeData, "datetime"]
@@ -166,24 +169,6 @@ class Horizontal50(baseAlgoLogic):
                             if df[stock].at[lastIndexTimeData, "timeUp"] == "timeUp":
                                 exitType = "TimeUpExit"
                                 stockAlgoLogic.exitOrder(index, exitType, df[stock].at[lastIndexTimeData, "c"])
-
-                            # elif df[stock].at[lastIndexTimeData, "Last"] == "Last":
-                            #     exitType = "LastDate"
-                            #     stockAlgoLogic.exitOrder(index, exitType, df[stock].at[lastIndexTimeData, "prev_c"])
-
-                            #     PnL = (((df[stock].at[lastIndexTimeData, "prev_c"] - row['EntryPrice']) * row['Quantity']))
-                            #     if PnL < 0:
-                            #         LossAmount = LossAmount + abs(PnL)
-                            #         nowTotalTrades = len(stockAlgoLogic.openPnl)
-                            #         output_string = f"{nowTotalTrades},TotalTradeCanCome:-{TotalTradeCanCome}, {df[stock].at[lastIndexTimeData, 'datetime']}, lastDay: {stock}, PnL:{PnL}, LossAmount:{LossAmount}\n"
-                            #         with open('reposrrrt.txt', 'a') as file:
-                            #             file.write(output_string)
-                            #     if PnL > 0:
-                            #         ProfitAmount = ProfitAmount + abs(PnL)
-                            #         nowTotalTrades = len(stockAlgoLogic.openPnl)
-                            #         output_string = f"{nowTotalTrades},TotalTradeCanCome:-{TotalTradeCanCome}, {df[stock].at[lastIndexTimeData, 'datetime']}, lastDay: {stock}, PnL:{PnL}, ProfitAmount:{ProfitAmount}\n"
-                            #         with open('reposrrrt.txt', 'a') as file:
-                            #             file.write(output_string)
 
                             elif df[stock].at[lastIndexTimeData, "yes"] == "no":
                                 exitType = "weeklyExit"
@@ -222,7 +207,7 @@ class Horizontal50(baseAlgoLogic):
                                 stockAlgoLogic.exitOrder(index, exitType, df[stock].at[lastIndexTimeData, "c"])
                                 nowTotalTrades = len(stockAlgoLogic.openPnl)
 
-                                PnL = (((df[stock].at[lastIndexTimeData, "c"] - row['EntryPrice']) * row['Quantity']) // 50)
+                                PnL = (((df[stock].at[lastIndexTimeData, "c"] - row['EntryPrice']) * row['Quantity']))
                                 ProfitAmount = ProfitAmount + PnL
 
                                 output_string = f"{nowTotalTrades},TotalTradeCanCome:-{TotalTradeCanCome}, {df[stock].at[lastIndexTimeData, 'datetime']}, TargetRsi: {stock}, PnL:{PnL} ProfitAmount:- {ProfitAmount}\n"
@@ -274,6 +259,13 @@ class Horizontal50(baseAlgoLogic):
                 lastIndexTimeData = timeData
                 stockAlgoLogic.pnlCalculator()
 
+            if lastIndexTimeData is not None:   
+                if df[stock].at[lastIndexTimeData, "timeUp"] == "timeUp":
+                    combined_df = stockAlgoLogic.openPnl.copy()
+                    expiryValue = (combined_df['CurrentPrice'] * combined_df['Quantity']).sum()
+                    output_string = f"{expiryValue}, {df[stock].at[lastIndexTimeData, 'datetime']}\n"
+                    with open('reposrrrtExpiry.txt', 'a') as file:
+                        file.write(output_string)
 
 if __name__ == "__main__":
     startNow = datetime.now()
@@ -283,7 +275,7 @@ if __name__ == "__main__":
     version = "v1"
 
     startDate = datetime(2019, 1, 1, 9, 15)
-    endDate = datetime(2025, 12, 31, 15, 30)
+    endDate = datetime(2024, 12, 31, 15, 30)
 
     portfolio = createPortfolio("/root/akashEquityBacktestAlgos/stocksList/nifty500 copy 2.md",1)
 
